@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Royals Logistics - Driver Payout with MongoDB Backend</title>
+
+<!-- Bootstrap 5 + Icons -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+<!-- Excel & Image libraries -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<!-- Axios for API calls -->
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+
+<style>
+body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; }
+#report { background: white; padding: 20px; border-radius: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.05); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+td, th { border: 1px solid #000; padding: 8px 6px; text-align: center; vertical-align: middle; }
+thead th { background: #ffc107; color: #000; font-weight: 700; }
+.section-title {
+    text-align: center;
+    font-weight: bold;
+    background: #e9ecef;
+    border: 1px solid #000;
+    padding: 8px;
+    margin-top: 10px;
+    margin-bottom: 0;
+    font-size: 1rem;
+}
+.summary td {
+    text-align: left;
+    font-weight: bold;
+    background: #fff;
+}
+.positive-bg { background: #00a651; color: #fff; font-weight: bold; }
+.negative-bg { background: #dc3545; color: #fff; font-weight: bold; }
+.positive-text { color: #00a651; font-weight: bold; }
+.negative-text { color: #dc3545; font-weight: bold; }
+tr:hover { background: #f1f9ff !important; cursor: pointer; transition: 0.2s; }
+.card-shadow { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+.btn-sm-custom { border-radius: 30px; }
+.month-filter-bar {
+    background: #fff;
+    padding: 12px 15px;
+    border-radius: 50px;
+    margin-bottom: 20px;
+    display: inline-flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+.filter-active {
+    background-color: #0d6efd;
+    color: white;
+    border-color: #0d6efd;
+}
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    background: rgba(0,0,0,0.6);
+    z-index: 9999;
+    display: none;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+}
+.spinner-custom {
+    background: white;
+    padding: 20px;
+    border-radius: 30px;
+}
+</style>
+</head>
+<body>
+
+<div class="container py-4" id="appContainer">
+    <div id="report">
+        <h3 class="text-center mb-3"><i class="bi bi-truck"></i> ROYALS LOGISTICS Driver Payout Summary <span id="cloudBadge" class="badge bg-success ms-2">MongoDB Sync ON</span></h3>
+
+        <!-- MONTH FILTER + GLOBAL ACTIONS -->
+        <div class="d-flex justify-content-between align-items-center flex-wrap mb-3">
+            <div class="month-filter-bar">
+                <span class="fw-bold me-2"><i class="bi bi-calendar-month"></i> Filter by Month:</span>
+                <input type="month" id="monthFilter" class="form-control form-control-sm w-auto" style="border-radius: 40px;">
+                <button id="applyMonthFilter" class="btn btn-sm btn-primary btn-sm-custom"><i class="bi bi-funnel"></i> Apply</button>
+                <button id="resetMonthFilter" class="btn btn-sm btn-outline-secondary btn-sm-custom"><i class="bi bi-arrow-repeat"></i> All Data</button>
+                <span class="text-muted small ms-2" id="filterStatus">Showing: all records</span>
+            </div>
+            <div>
+                <button id="refreshFromCloud" class="btn btn-outline-info btn-sm me-2"><i class="bi bi-cloud-download"></i> Sync from Server</button>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- FUEL TRANSFER -->
+            <div class="col-md-4">
+                <div class="section-title">FUEL TRANSFER DATA</div>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead><tr><th>DATE</th><th>VEHICLE</th><th>COMPANY</th><th>AMOUNT</th></tr></thead>
+                        <tbody id="fuelTable"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- CREDIT + ADVANCE -->
+            <div class="col-md-4">
+                <div class="section-title">AMOUNT CREDITED</div>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead><tr><th>DATE</th><th>TIME</th><th>AMOUNT</th><th>TYPE</th><th>NAME</th></tr></thead>
+                        <tbody id="creditTable"></tbody>
+                    </table>
+                </div>
+                <br>
+                <div class="section-title">Advance Amount</div>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead><tr><th>DATE</th><th>NAME</th><th>COMPANY</th><th>AMOUNT</th></tr></thead>
+                        <tbody id="advanceTable"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- SUMMARY PANEL -->
+            <div class="col-md-4">
+                <div class="card card-shadow p-2 mb-3">
+                    <table class="summary">
+                        <tr><td>Amount Credited</td><td id="creditTotal">0</td></tr>
+                        <tr><td>Fuel Used</td><td id="fuelTotal">0</td></tr>
+                        <tr><td>Advance</td><td id="advanceTotal">0</td></tr>
+                    </table>
+                </div>
+                <div class="card card-shadow p-2">
+                    <table class="summary">
+                        <tr><td>TOTAL CREDITED AMOUNT</td><td id="totalCredit">0</td></tr>
+                        <tr><td>TOTAL USED AMOUNT</td><td id="totalUsed">0</td></tr>
+                        <tr><td><b>REMAINING</b></td><td id="remaining">0</td></tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- INPUT FORM -->
+        <div class="card p-3 mt-4 shadow-sm">
+            <div class="row g-2">
+                <div class="col-md-2"><input type="date" id="date" class="form-control" placeholder="Date"></div>
+                <div class="col-md-2"><input type="time" id="time" class="form-control" placeholder="Time"></div>
+                <div class="col-md-2"><input type="text" id="vehicle" placeholder="Vehicle / Name" class="form-control"></div>
+                <div class="col-md-2"><input type="number" id="amount" placeholder="Amount" class="form-control"></div>
+                <div class="col-md-2">
+                    <select id="type" class="form-control">
+                        <option value="fuel">Fuel</option>
+                        <option value="credit">Credit</option>
+                        <option value="advance">Advance</option>
+                    </select>
+                </div>
+                <div class="col-md-1"><button onclick="addData()" class="btn btn-primary w-100"><i class="bi bi-plus-circle"></i> Add</button></div>
+                <div class="col-md-1"><button onclick="deleteSelected()" class="btn btn-danger w-100"><i class="bi bi-trash"></i></button></div>
+            </div>
+            
+        </div>
+
+        <div class="text-center mt-4">
+            <button onclick="downloadExcel()" class="btn btn-success me-2"><i class="bi bi-download"></i> Download Excel</button>
+            <button onclick="downloadImage()" class="btn btn-warning"><i class="bi bi-camera"></i> Download JPG</button>
+        </div>
+    </div>
+</div>
+
+<div id="loadingOverlay" class="loading-overlay">
+    <div class="spinner-custom text-center"><div class="spinner-border text-primary" role="status"></div><p class="mt-2">Syncing...</p></div>
+</div>
+
+<script>
+// ----------------------------- BACKEND API CONFIGURATION ---------------------------------
+// Update this to your backend URL when deploying
+const API_BASE_URL = "http://localhost:5000/api";
+
+// Data stores
+let fuelData = [];
+let advanceData = [];
+let creditData = [];
+let selectedIndex = null;
+let selectedType = null;
+
+// Month filter state
+let currentMonthFilter = "";
+let originalFuel = [], originalAdvance = [], originalCredit = [];
+
+// DOM elements
+const fuelTableEl = document.getElementById("fuelTable");
+const advanceTableEl = document.getElementById("advanceTable");
+const creditTableEl = document.getElementById("creditTable");
+const creditTotalEl = document.getElementById("creditTotal");
+const fuelTotalEl = document.getElementById("fuelTotal");
+const advanceTotalEl = document.getElementById("advanceTotal");
+const totalCreditEl = document.getElementById("totalCredit");
+const totalUsedEl = document.getElementById("totalUsed");
+const remainingEl = document.getElementById("remaining");
+const monthFilterInput = document.getElementById("monthFilter");
+const applyFilterBtn = document.getElementById("applyMonthFilter");
+const resetFilterBtn = document.getElementById("resetMonthFilter");
+const filterStatusSpan = document.getElementById("filterStatus");
+const refreshBtn = document.getElementById("refreshFromCloud");
+
+// Helper functions
+function formatDateToYMD(dateObj) {
+    if(!dateObj) return "";
+    let d = new Date(dateObj);
+    let year = d.getFullYear();
+    let month = String(d.getMonth() + 1).padStart(2,'0');
+    let day = String(d.getDate()).padStart(2,'0');
+    return `${year}-${month}-${day}`;
+}
+
+function formatDateForDisplay(d) {
+    if(!d) return "";
+    // Convert YYYY-MM-DD to DD-MM-YYYY for display
+    let parts = d.split("-");
+    if(parts.length === 3 && parts[0].length === 4) {
+        return `${parts[2]}-${parts[1]}-${parts[0]}`;
+    }
+    return d;
+}
+
+function formatDateForStorage(displayDate) {
+    // Convert DD-MM-YYYY to YYYY-MM-DD for storage
+    if(!displayDate) return "";
+    let parts = displayDate.split("-");
+    if(parts.length === 3 && parts[2].length === 4) {
+        return `${parts[2]}-${parts[1]}-${parts[0]}`;
+    }
+    return displayDate;
+}
+
+function formatTimeForDisplay(t) {
+    if(!t) return "";
+    let [h,m] = t.split(":");
+    if(!h) return t;
+    let hour = parseInt(h);
+    let ampm = hour >= 12 ? "PM" : "AM";
+    hour = hour % 12 || 12;
+    return `${String(hour).padStart(2,'0')}:${m} ${ampm}`;
+}
+
+function convertDateToInputFormat(displayDate) {
+    // Convert DD-MM-YYYY to YYYY-MM-DD for input field
+    if(!displayDate) return "";
+    let parts = displayDate.split("-");
+    if(parts.length === 3 && parts[2].length === 4) {
+        return `${parts[2]}-${parts[1]}-${parts[0]}`;
+    }
+    return "";
+}
+
+// Get year-month from date string (handles both YYYY-MM-DD and DD-MM-YYYY)
+function getYearMonthFromDate(dateStr) {
+    if (!dateStr) return "";
+    // Check if format is YYYY-MM-DD
+    if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        return dateStr.substring(0, 7);
+    }
+    // Check if format is DD-MM-YYYY
+    if (dateStr.match(/^\d{2}-\d{2}-\d{4}$/)) {
+        let parts = dateStr.split("-");
+        if (parts.length === 3) {
+            return `${parts[2]}-${parts[1]}`;
+        }
+    }
+    return "";
+}
+
+// API Calls
+async function loadFromBackend() {
+    showLoading(true);
+    try {
+        const response = await axios.get(`${API_BASE_URL}/transactions`);
+        const data = response.data;
+        
+        let newFuel = [], newAdvance = [], newCredit = [];
+        
+        data.forEach(tx => {
+            let itemDate = tx.date;
+            if (tx.type === "fuel") {
+                newFuel.push({ date: itemDate, vehicle: tx.vehicle, amount: Number(tx.amount), _id: tx._id });
+            } else if (tx.type === "advance") {
+                newAdvance.push({ date: itemDate, vehicle: tx.vehicle, amount: Number(tx.amount), _id: tx._id });
+            } else if (tx.type === "credit") {
+                newCredit.push({ date: itemDate, time: tx.time || "", amount: Number(tx.amount), _id: tx._id });
+            }
+        });
+        
+        originalFuel = newFuel;
+        originalAdvance = newAdvance;
+        originalCredit = newCredit;
+        currentMonthFilter = "";
+        if(monthFilterInput) monthFilterInput.value = "";
+        applyFilter();
+        document.getElementById("cloudBadge").innerHTML = `MongoDB Sync ON <i class="bi bi-cloud-check"></i>`;
+        
+        // Backup to localStorage
+        localStorage.setItem("royals_fuel", JSON.stringify(originalFuel));
+        localStorage.setItem("royals_advance", JSON.stringify(originalAdvance));
+        localStorage.setItem("royals_credit", JSON.stringify(originalCredit));
+    } catch (err) {
+        console.error("Failed to load data from server:", err);
+        document.getElementById("cloudBadge").innerHTML = `Server ⚠️ offline <i class="bi bi-cloud-slash"></i>`;
+        alert("Cannot connect to server. Using local backup data.");
+        loadFromLocalStorage();
+    } finally {
+        showLoading(false);
+    }
+}
+
+async function syncToBackend(transactions) {
+    showLoading(true);
+    try {
+        // First, clear all existing data
+        await axios.delete(`${API_BASE_URL}/transactions`);
+        
+        // Then insert all transactions
+        if (transactions.length > 0) {
+            await axios.post(`${API_BASE_URL}/transactions/bulk`, { transactions });
+        }
+        document.getElementById("cloudBadge").innerHTML = `MongoDB Sync ON <i class="bi bi-check-circle"></i>`;
+        return true;
+    } catch (err) {
+        console.error("Sync error:", err);
+        document.getElementById("cloudBadge").innerHTML = `Server ⚠️ offline <i class="bi bi-cloud-slash"></i>`;
+        alert("Sync failed: " + (err.response?.data?.error || err.message) + ". Data saved locally only.");
+        return false;
+    } finally {
+        showLoading(false);
+    }
+}
+
+async function addTransactionToBackend(transaction) {
+    try {
+        const response = await axios.post(`${API_BASE_URL}/transactions`, transaction);
+        return response.data;
+    } catch (err) {
+        console.error("Error adding transaction:", err);
+        throw err;
+    }
+}
+
+async function updateTransactionInBackend(id, transaction) {
+    try {
+        await axios.put(`${API_BASE_URL}/transactions/${id}`, transaction);
+    } catch (err) {
+        console.error("Error updating transaction:", err);
+        throw err;
+    }
+}
+
+async function deleteTransactionFromBackend(id) {
+    try {
+        await axios.delete(`${API_BASE_URL}/transactions/${id}`);
+    } catch (err) {
+        console.error("Error deleting transaction:", err);
+        throw err;
+    }
+}
+
+// Fallback to localStorage if backend is unavailable
+function loadFromLocalStorage() {
+    let storedFuel = localStorage.getItem("royals_fuel");
+    let storedAdvance = localStorage.getItem("royals_advance");
+    let storedCredit = localStorage.getItem("royals_credit");
+    if(storedFuel) originalFuel = JSON.parse(storedFuel);
+    if(storedAdvance) originalAdvance = JSON.parse(storedAdvance);
+    if(storedCredit) originalCredit = JSON.parse(storedCredit);
+    if(!originalFuel.length && !originalAdvance.length && !originalCredit.length) {
+        // Sample data with proper YYYY-MM-DD format for filtering
+        originalFuel = [{ date: "2026-04-01", vehicle: "KA01AB1234", amount: 4500 }];
+        originalAdvance = [{ date: "2026-04-02", vehicle: "Driver Raj", amount: 2000 }];
+        originalCredit = [{ date: "2026-04-01", time: "10:30", amount: 15000 }];
+    }
+    applyFilter();
+}
+
+async function persistAfterChange() {
+    // Prepare all transactions
+    let allTx = [];
+    originalFuel.forEach(f => { 
+        allTx.push({ type: "fuel", date: f.date, time: null, vehicle: f.vehicle, amount: f.amount }); 
+    });
+    originalAdvance.forEach(a => { 
+        allTx.push({ type: "advance", date: a.date, time: null, vehicle: a.vehicle, amount: a.amount }); 
+    });
+    originalCredit.forEach(c => { 
+        allTx.push({ type: "credit", date: c.date, time: c.time, vehicle: "Royal's", amount: c.amount }); 
+    });
+    
+    // Try to sync to backend
+    const synced = await syncToBackend(allTx);
+    
+    // Always backup to localStorage
+    localStorage.setItem("royals_fuel", JSON.stringify(originalFuel));
+    localStorage.setItem("royals_advance", JSON.stringify(originalAdvance));
+    localStorage.setItem("royals_credit", JSON.stringify(originalCredit));
+    
+    if (!synced) {
+        console.log("Data saved to localStorage only (offline mode)");
+    }
+}
+
+// Apply month filter on master arrays
+function applyFilter() {
+    let filterVal = currentMonthFilter.trim();
+    
+    if (!filterVal) {
+        fuelData = [...originalFuel];
+        advanceData = [...originalAdvance];
+        creditData = [...originalCredit];
+        filterStatusSpan.innerText = "Showing: all records";
+    } else {
+        // Filter by matching year-month from the stored date (which is in YYYY-MM-DD format)
+        fuelData = originalFuel.filter(item => {
+            if (!item.date) return false;
+            let itemYearMonth = getYearMonthFromDate(item.date);
+            return itemYearMonth === filterVal;
+        });
+        advanceData = originalAdvance.filter(item => {
+            if (!item.date) return false;
+            let itemYearMonth = getYearMonthFromDate(item.date);
+            return itemYearMonth === filterVal;
+        });
+        creditData = originalCredit.filter(item => {
+            if (!item.date) return false;
+            let itemYearMonth = getYearMonthFromDate(item.date);
+            return itemYearMonth === filterVal;
+        });
+        
+        filterStatusSpan.innerText = `Showing: ${filterVal}`;
+    }
+    render();
+}
+
+// RENDER function
+function render() {
+    fuelTableEl.innerHTML = "";
+    advanceTableEl.innerHTML = "";
+    creditTableEl.innerHTML = "";
+
+    let fuelSum = 0, advanceSum = 0, creditSum = 0;
+
+    // Fuel
+    if (fuelData.length === 0) {
+        fuelTableEl.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#999;">No records</td></tr>';
+    } else {
+        fuelData.forEach((r, idx) => {
+            fuelSum += r.amount;
+            let displayDate = formatDateForDisplay(r.date);
+            fuelTableEl.innerHTML += `<tr onclick="selectRow('fuel',${idx})">
+                <td>${displayDate}</td>
+                <td>${r.vehicle}</td>
+                <td>QNITY</td>
+                <td>${r.amount}</td>
+            </tr>`;
+        });
+    }
+
+    // Advance
+    if (advanceData.length === 0) {
+        advanceTableEl.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#999;">No records</td></tr>';
+    } else {
+        advanceData.forEach((r, idx) => {
+            advanceSum += r.amount;
+            let displayDate = formatDateForDisplay(r.date);
+            advanceTableEl.innerHTML += `<tr onclick="selectRow('advance',${idx})">
+                <td>${displayDate}</td>
+                <td>${r.vehicle}</td>
+                <td>QNITY</td>
+                <td>${r.amount}</td>
+            </tr>`;
+        });
+    }
+
+    // Credit
+    if (creditData.length === 0) {
+        creditTableEl.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#999;">No records</td></tr>';
+    } else {
+        creditData.forEach((r, idx) => {
+            creditSum += r.amount;
+            let displayDate = formatDateForDisplay(r.date);
+            let displayTime = r.time ? formatTimeForDisplay(r.time) : "";
+            creditTableEl.innerHTML += `<tr onclick="selectRow('credit',${idx})">
+                <td>${displayDate}</td>
+                <td>${displayTime}</td>
+                <td>${r.amount}</td>
+                <td>ACCOUNT</td>
+                <td>Royal's Logistics</td>
+            </tr>`;
+        });
+    }
+
+    let totalUsedVal = fuelSum + advanceSum;
+    let remainingVal = creditSum - totalUsedVal;
+
+    creditTotalEl.innerText = creditSum;
+    fuelTotalEl.innerText = fuelSum;
+    advanceTotalEl.innerText = advanceSum;
+    totalCreditEl.innerText = creditSum;
+    totalUsedEl.innerText = totalUsedVal;
+    
+    // Apply color to remaining amount
+    remainingEl.innerText = remainingVal;
+    if (remainingVal >= 0) {
+        remainingEl.style.color = "#00a651";
+        remainingEl.style.fontWeight = "bold";
+        remainingEl.style.backgroundColor = "transparent";
+    } else {
+        remainingEl.style.color = "#dc3545";
+        remainingEl.style.fontWeight = "bold";
+        remainingEl.style.backgroundColor = "transparent";
+    }
+}
+
+// Add/Update logic
+async function addData() {
+    let rawDate = document.getElementById("date").value;
+    if (!rawDate) { alert("Please select date"); return; }
+    // Store date in YYYY-MM-DD format internally
+    let storageDate = rawDate; // rawDate is already YYYY-MM-DD from input
+    let timeRaw = document.getElementById("time").value;
+    let vehicleVal = document.getElementById("vehicle").value.trim() || "N/A";
+    let amountVal = parseFloat(document.getElementById("amount").value);
+    if (isNaN(amountVal)) { alert("Enter valid amount"); return; }
+    let txType = document.getElementById("type").value;
+    
+    if (selectedIndex !== null && selectedType !== null && window._selectedRef) {
+        if (window._selectedRef.type === txType) {
+            let refObj = window._selectedRef;
+            
+            if (txType === "fuel") {
+                let idx = originalFuel.findIndex(f => f === refObj.obj);
+                if (idx !== -1) {
+                    originalFuel[idx] = { date: storageDate, vehicle: vehicleVal, amount: amountVal, _id: refObj.obj._id };
+                    if (refObj.obj._id) {
+                        await updateTransactionInBackend(refObj.obj._id, {
+                            type: "fuel",
+                            date: storageDate,
+                            vehicle: vehicleVal,
+                            amount: amountVal
+                        }).catch(err => console.error("Update failed:", err));
+                    }
+                }
+            } else if (txType === "advance") {
+                let idx = originalAdvance.findIndex(a => a === refObj.obj);
+                if (idx !== -1) {
+                    originalAdvance[idx] = { date: storageDate, vehicle: vehicleVal, amount: amountVal, _id: refObj.obj._id };
+                    if (refObj.obj._id) {
+                        await updateTransactionInBackend(refObj.obj._id, {
+                            type: "advance",
+                            date: storageDate,
+                            vehicle: vehicleVal,
+                            amount: amountVal
+                        }).catch(err => console.error("Update failed:", err));
+                    }
+                }
+            } else if (txType === "credit") {
+                let idx = originalCredit.findIndex(c => c === refObj.obj);
+                if (idx !== -1) {
+                    originalCredit[idx] = { date: storageDate, time: timeRaw, amount: amountVal, _id: refObj.obj._id };
+                    if (refObj.obj._id) {
+                        await updateTransactionInBackend(refObj.obj._id, {
+                            type: "credit",
+                            date: storageDate,
+                            time: timeRaw,
+                            amount: amountVal
+                        }).catch(err => console.error("Update failed:", err));
+                    }
+                }
+            }
+            window._selectedRef = null;
+            selectedIndex = null;
+            selectedType = null;
+        } else { 
+            alert("Please re-select the row"); 
+            clearSelection(); 
+        }
+    } else {
+        let newTransaction = null;
+        if (txType === "fuel") {
+            newTransaction = { date: storageDate, vehicle: vehicleVal, amount: amountVal };
+            try {
+                const saved = await addTransactionToBackend({ type: "fuel", ...newTransaction });
+                originalFuel.push({ ...newTransaction, _id: saved._id });
+            } catch (err) {
+                originalFuel.push({ ...newTransaction });
+            }
+        } else if (txType === "advance") {
+            newTransaction = { date: storageDate, vehicle: vehicleVal, amount: amountVal };
+            try {
+                const saved = await addTransactionToBackend({ type: "advance", ...newTransaction });
+                originalAdvance.push({ ...newTransaction, _id: saved._id });
+            } catch (err) {
+                originalAdvance.push({ ...newTransaction });
+            }
+        } else if (txType === "credit") {
+            newTransaction = { date: storageDate, time: timeRaw, amount: amountVal };
+            try {
+                const saved = await addTransactionToBackend({ type: "credit", ...newTransaction });
+                originalCredit.push({ ...newTransaction, _id: saved._id });
+            } catch (err) {
+                originalCredit.push({ ...newTransaction });
+            }
+        }
+    }
+    clearFormInputs();
+    clearSelection();
+    applyFilter();
+    persistAfterChange();
+}
+
+function selectRow(type, idx) {
+    let obj = null;
+    if (type === "fuel") obj = fuelData[idx];
+    else if (type === "advance") obj = advanceData[idx];
+    else if (type === "credit") obj = creditData[idx];
+    if (!obj) return;
+    window._selectedRef = { type: type, obj: obj };
+    selectedIndex = idx;
+    selectedType = type;
+    
+    document.getElementById("vehicle").value = obj.vehicle || "";
+    document.getElementById("amount").value = obj.amount;
+    if (obj.date) {
+        // obj.date is in YYYY-MM-DD format, directly usable in input
+        document.getElementById("date").value = obj.date;
+    }
+    if (type === "credit" && obj.time) {
+        document.getElementById("time").value = obj.time;
+    } else {
+        document.getElementById("time").value = "";
+    }
+    document.getElementById("type").value = type;
+}
+
+async function deleteSelected() {
+    if (!window._selectedRef) { alert("Select a row first"); return; }
+    let { type, obj } = window._selectedRef;
+    
+    if (obj._id) {
+        await deleteTransactionFromBackend(obj._id).catch(err => console.error("Delete failed:", err));
+    }
+    
+    if (type === "fuel") {
+        let idx = originalFuel.findIndex(f => f === obj);
+        if (idx !== -1) originalFuel.splice(idx, 1);
+    } else if (type === "advance") {
+        let idx = originalAdvance.findIndex(a => a === obj);
+        if (idx !== -1) originalAdvance.splice(idx, 1);
+    } else if (type === "credit") {
+        let idx = originalCredit.findIndex(c => c === obj);
+        if (idx !== -1) originalCredit.splice(idx, 1);
+    }
+    clearSelection();
+    applyFilter();
+    persistAfterChange();
+}
+
+function clearSelection() {
+    window._selectedRef = null;
+    selectedIndex = null;
+    selectedType = null;
+}
+
+function clearFormInputs() {
+    document.getElementById("vehicle").value = "";
+    document.getElementById("amount").value = "";
+    document.getElementById("date").value = "";
+    document.getElementById("time").value = "";
+}
+
+function showLoading(show) {
+    document.getElementById("loadingOverlay").style.display = show ? "flex" : "none";
+}
+
+// Month filter event handlers
+applyFilterBtn.onclick = () => {
+    let val = monthFilterInput.value;
+    currentMonthFilter = val;
+    applyFilter();
+};
+
+resetFilterBtn.onclick = () => {
+    monthFilterInput.value = "";
+    currentMonthFilter = "";
+    applyFilter();
+};
+
+refreshBtn.onclick = async () => {
+    await loadFromBackend();
+    alert("Data refreshed from server");
+};
+
+function downloadExcel() {
+    let wb = XLSX.utils.book_new();
+    let ws = XLSX.utils.table_to_sheet(document.getElementById("report"));
+    XLSX.utils.book_append_sheet(wb, ws, "Royals_Report");
+    XLSX.writeFile(wb, `Royals_Report_${new Date().toISOString().slice(0,19)}.xlsx`);
+}
+
+function downloadImage() {
+    html2canvas(document.querySelector("#report"), { scale: 2, backgroundColor: '#ffffff' }).then(canvas => {
+        let link = document.createElement("a");
+        link.download = "royals_report.jpg";
+        link.href = canvas.toDataURL();
+        link.click();
+    });
+}
+
+// Initialize
+window.onload = async () => {
+    await loadFromBackend();
+    // Set default month filter to current month
+    let now = new Date();
+    let currentMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    monthFilterInput.value = currentMonth;
+    currentMonthFilter = currentMonth;
+    applyFilter();
+};
+</script>
+</body>
+</html>
